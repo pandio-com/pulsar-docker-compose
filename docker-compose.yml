@@ -1,0 +1,180 @@
+version: '3.4'
+
+networks:
+  pulsar:
+    driver: bridge
+
+services:
+
+  lzk1:
+    container_name: lzk1
+    hostname: lzk1
+    image: apachepulsar/pulsar-all:latest
+    command: >
+      bash -c "bin/run-local-zk.sh && \
+               bin/pulsar zookeeper"
+    environment:
+      ZOOKEEPER_SERVERS: lzk1
+    volumes:
+      - ./run-local-zk.sh/:/pulsar/bin/run-local-zk.sh
+    networks:
+      pulsar:
+
+  pulsar-init:
+    container_name: pulsar-init
+    hostname: pulsar-init
+    image: apachepulsar/pulsar-all:latest
+    command: bin/init-cluster.sh
+    environment:
+      clusterName: test
+      zkServers: lzk1:2181
+      configurationStore: lzk1:2181
+      pulsarNode: apache-pulsar
+    volumes:
+      - ./init-cluster.sh/:/pulsar/bin/init-cluster.sh
+      - ./watch-znode.py/:/pulsar/bin/watch-znode.py
+    depends_on:
+      - lzk1
+    networks:
+      pulsar:
+
+  bk1:
+    hostname: bk1
+    container_name: bk1
+    image: apachepulsar/pulsar-all:latest
+    command: >
+      bash -c "bin/run-bookie.sh && \
+               bin/pulsar bookie"
+    environment:
+      clusterName: test
+      zkServers: lzk1:2181
+      numAddWorkerThreads: 8
+      useHostNameAsBookieID: "true"
+    volumes:
+      - ./run-bookie.sh/:/pulsar/bin/run-bookie.sh
+      - ./watch-znode.py/:/pulsar/bin/watch-znode.py
+    depends_on:
+      - lzk1
+      - pulsar-init
+    networks:
+      pulsar:
+
+  bk2:
+    hostname: bk2
+    container_name: bk2
+    image: apachepulsar/pulsar-all:latest
+    command: >
+      bash -c "bin/run-bookie.sh && \
+               bin/pulsar bookie"
+    environment:
+      clusterName: test
+      zkServers: lzk1:2181
+      numAddWorkerThreads: 8
+      useHostNameAsBookieID: "true"
+    volumes:
+      - ./run-bookie.sh/:/pulsar/bin/run-bookie.sh
+      - ./watch-znode.py/:/pulsar/bin/watch-znode.py
+    depends_on:
+      - lzk1
+      - pulsar-init
+      - bk1
+    networks:
+      pulsar:
+
+  bk3:
+    hostname: bk3
+    container_name: bk3
+    image: apachepulsar/pulsar-all:latest
+    command: >
+      bash -c "bin/run-bookie.sh && \
+               bin/pulsar bookie"
+    environment:
+      clusterName: test
+      zkServers: lzk1:2181
+      numAddWorkerThreads: 8
+      useHostNameAsBookieID: "true"
+    volumes:
+      - ./run-bookie.sh/:/pulsar/bin/run-bookie.sh
+      - ./watch-znode.py/:/pulsar/bin/watch-znode.py
+    depends_on:
+      - lzk1
+      - pulsar-init
+      - bk1
+      - bk2
+    networks:
+      pulsar:
+
+  apache-pulsar:
+    hostname: apache-pulsar
+    container_name: apache-pulsar
+    image: apachepulsar/pulsar-all:latest
+    restart: on-failure
+    command: >
+      bash -c "bin/run-broker.sh && \
+               bin/pulsar broker"
+    environment:
+      clusterName: test
+      zookeeperServers: lzk1:2181
+      configurationStore: lzk1:2181
+      webSocketServiceEnabled: "true"
+    volumes:
+      - ./run-broker.sh/:/pulsar/bin/run-broker.sh
+      - ./watch-znode.py/:/pulsar/bin/watch-znode.py
+    depends_on:
+      - lzk1
+      - pulsar-init
+      - bk1
+      - bk2
+      - bk3
+    networks:
+      pulsar:
+
+  pulsar-proxy:
+    hostname: pulsar-proxy
+    container_name: pulsar-proxy
+    restart: on-failure
+    image: apachepulsar/pulsar-all:latest
+    command: >
+      bash -c "bin/run-proxy.sh && \
+               bin/pulsar proxy"
+    environment:
+      clusterName: test
+      zookeeperServers: lzk1:2181
+      configurationStoreServers: lzk1:2181
+      webSocketServiceEnabled: "true"
+    ports:
+      - "6650:6650"
+      - "8080:8080"
+    volumes:
+      - ./run-proxy.sh:/pulsar/bin/run-proxy.sh
+      - ./watch-znode.py/:/pulsar/bin/watch-znode.py
+    depends_on:
+      - lzk1
+      - pulsar-init
+      - bk1
+      - bk2
+      - bk3
+      - apache-pulsar
+    networks:
+      pulsar:
+
+  pulsar-manager:
+    image: apachepulsar/pulsar-manager:v0.2.0
+    ports:
+      - "9527:9527"
+    depends_on:
+      - pulsar-proxy
+    links:
+      - pulsar-proxy
+    volumes:
+      - "./data/:/data"
+    environment:
+      REDIRECT_HOST: "http://127.0.0.1"
+      REDIRECT_PORT: "9527"
+      DRIVER_CLASS_NAME: "org.postgresql.Driver"
+      URL: "jdbc:postgresql://127.0.0.1:5432/pulsar_manager"
+      USERNAME: "pulsar"
+      PASSWORD: "pulsar"
+      LOG_LEVEL: "DEBUG"
+    networks:
+      pulsar:
